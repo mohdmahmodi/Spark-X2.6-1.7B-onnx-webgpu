@@ -1,0 +1,132 @@
+---
+license: apache-2.0
+base_model: XHToken/Spark-X2.6-1.7B
+base_model_relation: quantized
+pipeline_tag: text-generation
+library_name: onnxruntime
+tags:
+  - onnx
+  - webgpu
+  - onnxruntime-web
+  - in-browser
+  - int4
+  - spark2_5
+language:
+  - en
+  - zh
+---
+
+# Spark-X2.6-1.7B ONNX for WebGPU
+
+![Spark-X2.6-1.7B in the browser](assets/hero.png)
+
+[XHToken/Spark-X2.6-1.7B](https://huggingface.co/XHToken/Spark-X2.6-1.7B) converted to ONNX for in-browser inference
+with [onnxruntime-web](https://onnxruntime.ai/docs/tutorials/web/) on WebGPU. It uses the official INT4 weights,
+repacked without loss, and scores the same as the official INT4 checkpoint run in transformers.
+
+- [Try it in your browser](https://huggingface.co/spaces/mohdmahmodi/Spark-X2.6-1.7B-WebGPU)
+- [Source code and validation](https://github.com/mohdmahmodi/Spark-X2.6-1.7B-onnx-webgpu)
+
+| | |
+|---|---|
+| Base model | [XHToken/Spark-X2.6-1.7B](https://huggingface.co/XHToken/Spark-X2.6-1.7B), 1.7B parameters |
+| Weights | official [Spark-X2.6-1.7B-INT4](https://huggingface.co/XHToken/Spark-X2.6-1.7B-INT4) GPTQ codes, 4-bit, group size 32 |
+| Runtime | onnxruntime-web on WebGPU (browser); native onnxruntime on CPU |
+| Size | 1.21 GB (q4f16) or 1.34 GB (q4) |
+
+![Chat app](assets/chat.png)
+
+## Model quality
+
+As reported by XHToken for the original Spark-X2.6-1.7B, against models of similar size, with thinking on at high
+effort; Spark-X2.6-4B is their reference column. This build runs the official INT4 weights of the same model; the
+checks below compare it with that checkpoint.
+
+![Model quality, reported by XHToken](assets/quality.png)
+
+![All 30 benchmarks, reported by XHToken](assets/results.png)
+
+## Accuracy of this build
+
+Measured in Chrome on WebGPU against the original model in transformers, on identical prompts, chat template and
+greedy decoding.
+
+![Accuracy](assets/accuracy.png)
+
+| Check | transformers bf16 | transformers, official INT4 | This build |
+|---|---|---|---|
+| GSM8K, 1,319 problems, thinking off | 75.7% | 72.7% | 72.7% |
+| BFCL v3 simple function calling, 200 cases | 76.5% | 52.5% | 52.5% |
+| Needle in a haystack, 1k–16k tokens, 12 cases | 12/12 | 12/12 | 12/12 |
+| Next-token KL divergence to bf16, 160 positions | 0 | 0.0731 | 0.0757 |
+| Greedy parity, 50 prompts: first token identical | 50/50 | 40/50 | 39/50 |
+
+Against the INT4 run, the browser build answers differently on 38 GSM8K problems one way and 38 the other
+(McNemar p = 1.00) and on 4 and 4 BFCL cases (p = 1.00). Scores use thinking off and are not comparable to results
+measured with thinking on. Method and per-case results are in the
+[validation report](https://github.com/mohdmahmodi/Spark-X2.6-1.7B-onnx-webgpu/blob/main/docs/VALIDATION.md).
+
+The official INT4 weights cost this model more than they cost the 4B: against bf16 they score 72.7% vs 75.7% on GSM8K
+and 52.5% vs 76.5% on BFCL. On BFCL the INT4 model mostly answers in text where bf16 calls the tool; when it does
+call, its arguments are as accurate. This build reproduces the INT4 checkpoint, gap included. The decoding of the INT4
+weights was checked against compressed-tensors, the library that wrote the checkpoint: every tensor matches exactly.
+
+![Speed](assets/speed.png)
+
+About 105 tokens per second, from a short prompt up to 16k tokens of context. The first token arrives in 49 ms for a
+short prompt and in 5.9 s for a 16k-token prompt. Measured in Chrome on Windows 11 with an NVIDIA RTX 3090 Ti; speed
+depends on the GPU.
+
+## Files
+
+| File | Contents |
+|---|---|
+| `onnx/model_q4f16.onnx` + `_data` | default: 4-bit weights, fp16 activations, 1.21 GB |
+| `onnx/model_q4.onnx` + `_data` | GPUs without `shader-f16`: 4-bit weights, fp32 activations, 1.34 GB |
+| `spark.json` | variants, file lists, build ids, cache shapes |
+| `tokenizer.json`, `tokenizer_config.json` | tokenizer, with the official chat template inlined |
+| `config.json`, `generation_config.json`, `LICENSE` | from the original model |
+
+## Graph
+
+- **Weights.** Attention and MLP projections are 4-bit `MatMulNBits` with group size 32, taken directly from the
+  official GPTQ checkpoint. `out_proj`, the attention gate `g_proj` and the LM head are 8-bit. Input tokens are looked
+  up in the same int8 table as the LM head; the official checkpoint keeps a separate bf16 input embedding, and the
+  swap measures as lossless (mean KL 0.0007 to bf16 in transformers, no benchmark change).
+- **Operators.** Fused `GroupQueryAttention` (sliding window 512 on 21 of 28 layers, per-layer-type rotary embedding
+  including partial rotary), `SkipSimplifiedLayerNormalization`, `GatherBlockQuantized`. `MatMulNBits` uses
+  `accuracy_level=0`, which keeps activations in floating point.
+- **Inputs.** `input_ids` `[1, S]` int64; `attention_mask` `[1, total]` int64, all ones; and
+  `past_key_values.{0..27}.{key,value}` `[1, 2, P, 256]`.
+- **Outputs.** `logits` `[1, 1, 131072]` float32, last position only; and `present.*`. Past and present can be bound
+  to the same preallocated GPU buffer for an in-place static KV cache.
+- **Runtime.** onnxruntime-web `1.31.0-dev.20260918-bc8e7ed75` or newer, imported from `onnxruntime-web/webgpu`.
+
+The graph has its own input layout and is not a Transformers.js model. A small loader with the chat template, KV
+cache handling and streaming is in the [source repository](https://github.com/mohdmahmodi/Spark-X2.6-1.7B-onnx-webgpu):
+
+```js
+import { loadSpark } from "./lib/spark.js";
+
+const spark = await loadSpark({ base: "https://huggingface.co/mohdmahmodi/Spark-X2.6-1.7B-ONNX-WebGPU/resolve/main" });
+let reply = "";
+for await (const piece of spark.generate([{ role: "user", content: "Hello!" }], { thinking: false })) reply += piece;
+```
+
+## Requirements and limitations
+
+- Desktop Chrome or Edge with WebGPU, about 1.5 GB of free GPU memory at 4k tokens of context, and a storage-buffer
+  binding limit of at least 268 MB. Many phones and older GPUs do not meet the binding limit.
+- Tested on Windows 11 with an RTX 3090 Ti only.
+- The official INT4 weights lose accuracy against bf16 on this model, most of all on function calling; this build
+  reproduces the INT4 checkpoint and inherits that.
+- The WASM (CPU) backend of onnxruntime-web is not supported: its WebAssembly build has no fast kernel for 4-bit
+  matrix multiplies, so a WASM-compatible export runs correctly but at about 1.5 tokens per second.
+- Two tabs of the app in one Chrome instance can cause a "device lost" error on Windows; use one tab.
+
+## License
+
+Apache-2.0, the same as the base model. Spark-X2.6-1.7B is developed by XHToken; this repository contains a format
+conversion of their released weights.
+
+Converted and validated by Mohd Mahmodi ([GitHub](https://github.com/mohdmahmodi), [X](https://x.com/mohdmahmodi)).
