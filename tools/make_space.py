@@ -44,7 +44,7 @@ thumbnail: https://huggingface.co/{model}/resolve/main/assets/hero.png
 Chat with [XHToken/Spark-X2.6-1.7B](https://huggingface.co/XHToken/Spark-X2.6-1.7B) running entirely on your GPU
 through WebGPU. Nothing you type leaves your device.
 
-Requires desktop Chrome or Edge and about 2 GB of free GPU memory. The 1.21 GB model is downloaded from
+Requires desktop Chrome or Edge and about 1.5 GB of free GPU memory. The 1.21 GB model is downloaded from
 [{model}](https://huggingface.co/{model}) on the first visit and cached by the browser.
 
 Benchmarks: `benchmarks.html` (linked in the sidebar). Source and validation: {source}
