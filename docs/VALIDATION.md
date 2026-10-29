@@ -35,6 +35,7 @@ WebGPU kernels vs CPU kernels, same graph: mean KL 0.00028, max 0.0099, top-1 ag
 
 | system | first token same | identical 128-token outputs | mean tokens before divergence | median |
 |---|---|---|---|---|
+| browser q4 (fp32 activations) | 39/50 | 6/50 | 21.1 | 7 |
 | **browser q4f16 (shipped)** | 39/50 | 6/50 | 22.4 | 7 |
 | transformers + official INT4 weights | 40/50 | 6/50 | 24.4 | 8 |
 | same ONNX graph, CPU onnxruntime | 39/50 | 6/50 | 21.1 | 7 |
@@ -106,6 +107,8 @@ Browser, mean matched tokens by category: chat 9, code 37, math 40, zh 6, tool 1
 
 | system | score | vs INT4 weights: only-INT4-right / only-this-right, McNemar p |
 |---|---|---|
+| browser q4 (fp32 activations) | 12/12 (100.0%) |  |
+| | 1024_start: ok, 1024_middle: ok, 1024_end: ok, 4096_start: ok, 4096_middle: ok, 4096_end: ok, 8192_start: ok, 8192_middle: ok, 8192_end: ok, 16384_start: ok, 16384_middle: ok, 16384_end: ok | |
 | **browser q4f16 (shipped)** | 12/12 (100.0%) |  |
 | | 1024_start: ok, 1024_middle: ok, 1024_end: ok, 4096_start: ok, 4096_middle: ok, 4096_end: ok, 8192_start: ok, 8192_middle: ok, 8192_end: ok, 16384_start: ok, 16384_middle: ok, 16384_end: ok | |
 | transformers bf16 | 12/12 (100.0%) |  |
@@ -137,6 +140,28 @@ Browser outputs:
 - **answer uses tool result**: `The weather in Berlin right now is 18°C with light rain.`
 - **KV prefix reuse == fresh prefill**: `reused 117 of 132 prompt tokens, 42/42 tokens identical, TTFT 71 -> 50 ms`
 
+## Smaller GPU limits
+
+`tests/run_browser.mjs --max-binding BYTES --max-buffer BYTES` gives the page a device with lower
+`maxStorageBufferBindingSize` / `maxBufferSize` on the same GPU, a stand-in for phones and other GPUs with small limits
+that were not available. Both runs below use WebGPU's defaults, 128 MiB per binding and 256 MiB per buffer, the
+smallest limits a WebGPU device can have.
+
+| device limits (binding / buffer) | variant | needle, 12 cases, 1k-16k | greedy parity, 50 prompts |
+|---|---|---|---|
+| 128 MiB / 256 MiB | q4f16 | 12/12 identical to the unrestricted run | 50/50 identical |
+| 128 MiB / 256 MiB | q4 | 12/12 identical to the unrestricted q4 run | 50/50 identical |
+
+- **Weights.** The largest tensor, the int8 embedding / LM head table, is 268,435,456 bytes, exactly the default
+  `maxBufferSize`. onnxruntime-web binds it in pieces where the binding limit is 128 MiB. The loader used to require
+  the binding limit to fit the table, which rejected devices that can run the model.
+- **Activations.** For a long prompt the MLP intermediate `[S, 6656]` is the largest activation (436 MB in fp32 at 16k
+  tokens). Split bindings returned all-zero output for a 671 MB fp32 intermediate (the 4B at 16k), so where the
+  binding limit is small the loader prefills in pieces that keep it within one binding (4,864 tokens for q4 and 9,984
+  for q4f16 at 128 MiB). With this GPU's own limit (2 GiB per binding) nothing is split and the published results are
+  unchanged (`browser_q4f16` rerun: 12/12 and 50/50 identical).
+
+
 ## Speed (RTX 3090 Ti, Chrome, q4f16, greedy, headless)
 
 | measure | value |
@@ -162,6 +187,37 @@ token's time is dominated by dispatching the per-layer kernels, not by attention
 - decode tok/s (prompts < 1k tokens): first sixth 102.3, last sixth 101.6
 - GPU memory used (whole GPU) after warm-up: 3873 MB -> 3368 MB (max 3879 MB)
 - page JS heap after warm-up: 35 MB -> 35 MB; KV capacity 1024 tokens
+
+## Transformers.js
+
+The published files with the generated `config.json` (`model_type: "qwen3"`), loaded by Transformers.js 4.3.2 in
+Chrome (`AutoModelForCausalLM`, `generate` with greedy decoding, `apply_chat_template` for the prompts), run through
+the same suites as the app. Two runtimes: the onnxruntime-web build bundled with Transformers.js 4.3.2
+(`1.31.0-dev.20260914`) and the app's `1.31.0-dev.20260918`, swapped in with an import map.
+
+| check | bundled runtime | runtime 0918 |
+|---|---|---|
+| prompt ids, all suites | identical to Python transformers | identical |
+| logits vs this build, 160 positions | mean KL 0.000000, top-1 1.000 | mean KL 0.000000, top-1 1.000 |
+| greedy parity, 50 prompts | 50/50 identical to this build | 50/50 identical |
+| BFCL, 200 cases | 105/200, 200/200 identical outputs | 105/200, 200/200 identical |
+| GSM8K, first 200 problems | 147/200, 197/200 identical outputs (the other 3 diverge late and score the same) | not run |
+| needle in a haystack, 12 cases | 9/12: every 16k case fails (`Buffer size (4290250000) exceeds the max buffer size limit`) | 12/12, identical outputs |
+| `pipeline("text-generation")` as in the README, 10 chat prompts | 10/10 identical text | 10/10 identical text |
+
+Decode speed, 256 new tokens, mean of the second and third run (Chrome, RTX 3090 Ti):
+
+| context | this build (static KV cache) | Transformers.js, bundled runtime | Transformers.js, runtime 0918 |
+|---|---|---|---|
+| short prompt | 117.6 tok/s, first token 0.05 s | 99.3 tok/s, 0.05 s | 99.7 tok/s, 0.05 s |
+| 1k tokens | 119.7 tok/s, 0.29 s | 90.4 tok/s, 0.36 s | 94.1 tok/s, 0.29 s |
+| 4k tokens | 120.2 tok/s, 1.15 s | 27.7 tok/s, 2.86 s | 28.4 tok/s, 1.16 s |
+| 8k tokens | 119.6 tok/s, 2.48 s | 22.6 tok/s, 9.60 s | 23.7 tok/s, 2.48 s |
+| 16k tokens | 113.4 tok/s, 5.88 s | fails | 18.0 tok/s, 5.81 s |
+
+Transformers.js grows the KV cache at every step. Switching this app to a growing cache (`?kv=dynamic`) slows it to
+the same ~17 tok/s at 16k, so the gap comes from the cache handling, not from the graph.
+
 
 ## INT4 reference and the input embedding
 

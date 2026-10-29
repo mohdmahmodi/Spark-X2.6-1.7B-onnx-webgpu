@@ -198,7 +198,7 @@ for await (const text of spark.generate(messages, { thinking: false })) {
 
         <h2 id="limits">Limitations</h2>
         <ul>
-          <li>It needs WebGPU on a desktop browser, about 1.5 GB of free GPU memory at 4k tokens of context, and a 268 MB storage-buffer limit. Many phones and older GPUs fall short of the buffer limit.</li>
+          <li>It needs WebGPU on a desktop browser and about 1.5 GB of free GPU memory at 4k tokens of context. The default WebGPU buffer limits are enough.</li>
           <li>The browser's WebAssembly (CPU) backend is too slow to be useful: it runs a compatible export correctly, but at about 1.5 tokens per second, because its 4-bit matrix multiplies have no fast kernel.</li>
           <li>The official 4-bit weights score lower than the original model on function calling and math, and this build inherits that.</li>
           <li>Testing so far covers Windows with an NVIDIA RTX 3090 Ti. macOS, Android and other GPUs are untested.</li>

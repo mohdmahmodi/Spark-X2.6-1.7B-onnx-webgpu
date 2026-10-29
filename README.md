@@ -47,7 +47,7 @@ repository.
 |---|---|
 | Browser | Chrome or Edge 113+ on desktop. GPUs without `shader-f16` get the fp32-activation build automatically |
 | GPU memory | about 1.5 GB at 4k tokens of context (1.21 GB weights + 0.23 GB KV cache per 4k tokens) |
-| Storage buffer binding | at least 268 MB (the int8 embedding table) |
+| GPU buffer size | the WebGPU defaults are enough: the largest tensor, the int8 embedding table, is exactly the 256 MiB default `maxBufferSize`, and onnxruntime binds it in pieces where the binding limit is the 128 MiB default |
 | Runtime | WebGPU only in the browser. The WASM (CPU) backend of onnxruntime-web is too slow for this model, see [Limitations](#limitations). The same files run with native onnxruntime on CPU (used in the validation). |
 
 URL options: `?model=<url>` loads the model folder from another location, `?variant=q4` forces the fp32-activation
@@ -156,6 +156,37 @@ for await (const piece of spark.generate(messages, { thinking: false, temperatur
 `generate` also accepts `effort` (`"high"` or `"low"`), `tools` (OpenAI-style function definitions),
 `topP`, `topK` and `signal` (an `AbortSignal`). `parseToolCalls` from `web/lib/toolcall.js` extracts Spark tool calls
 from the output. Add the import map from `web/index.html`, which pins onnxruntime-web, tokenizers.js and jinja.
+
+### With Transformers.js
+
+The published files also load in Transformers.js 4.3. `config.json` declares `model_type: "qwen3"`: Transformers.js
+has no class for Spark, and its Qwen3 decoder feeds this graph exactly the inputs and KV cache it expects.
+
+```js
+import { pipeline } from "@huggingface/transformers";
+
+const generator = await pipeline("text-generation", "mohdmahmodi/Spark-X2.6-1.7B-ONNX-WebGPU", { device: "webgpu", dtype: "q4f16" });
+const out = await generator([{ role: "user", content: "Explain WebGPU in one sentence." }], {
+  max_new_tokens: 256, do_sample: false, tokenizer_encode_kwargs: { enable_thinking: false },
+});
+console.log(out[0].generated_text.at(-1).content);
+```
+
+The answers are the same as the app's: identical logits, and identical output on all 50 greedy prompts, all 200 BFCL
+cases and 197 of the first 200 GSM8K problems (the other 3 split partway through and score the same). Transformers.js
+grows its KV cache at every step, so decoding slows down as the context grows. Same machine, same run:
+
+| Context | Transformers.js | `web/lib/spark.js` |
+|---|---|---|
+| short prompt | 100 tok/s | 118 tok/s |
+| 1k tokens | 94 tok/s | 120 tok/s |
+| 4k tokens | 28 tok/s | 120 tok/s |
+| 8k tokens | 24 tok/s | 120 tok/s |
+| 16k tokens | 18 tok/s | 113 tok/s |
+
+The Transformers.js column uses onnxruntime-web `1.31.0-dev.20260918`, the app's build. 16k-token prompts need that
+build or newer: Transformers.js 4.3.2 bundles an older one that fails on them. With the newer build swapped in, all 12
+needle tests up to 16k tokens pass with output identical to the app's.
 
 ## Repository layout
 
