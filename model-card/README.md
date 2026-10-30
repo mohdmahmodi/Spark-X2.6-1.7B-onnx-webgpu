@@ -19,6 +19,10 @@ language:
 
 # Spark-X2.6-1.7B ONNX for WebGPU
 
+[![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-md.svg)](https://huggingface.co/spaces/mohdmahmodi/Spark-X2.6-1.7B-WebGPU)
+[![Source on GitHub](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/mohdmahmodi/Spark-X2.6-1.7B-onnx-webgpu)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](https://www.apache.org/licenses/LICENSE-2.0)
+
 ![Spark-X2.6-1.7B in the browser](assets/hero.png)
 
 [XHToken/Spark-X2.6-1.7B](https://huggingface.co/XHToken/Spark-X2.6-1.7B) converted to ONNX for in-browser inference
@@ -131,6 +135,12 @@ machine:
 
 The Transformers.js column uses onnxruntime-web `1.31.0-dev.20260918`. Prompts of 16k tokens need that build or newer:
 Transformers.js 4.3.2 bundles an older one that fails on them.
+
+On a GPU with the 128 MiB default storage-buffer binding limit, as on many phones, use the loader below for long
+prompts. Transformers.js prefills a prompt in one pass, and onnxruntime-web's layer-norm kernels
+return zeros once the hidden state is larger than one binding, without an error: from 16,385 tokens with
+`q4` and 32,769 with `q4f16`. That loader prefills in pieces and is not affected. Reported as
+[microsoft/onnxruntime#33755](https://github.com/microsoft/onnxruntime/issues/33755); the fix is [#33760](https://github.com/microsoft/onnxruntime/pull/33760).
 
 ### Included loader
 

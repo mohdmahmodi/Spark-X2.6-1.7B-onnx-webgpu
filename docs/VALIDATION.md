@@ -155,10 +155,15 @@ smallest limits a WebGPU device can have.
 - **Weights.** The largest tensor, the int8 embedding / LM head table, is 268,435,456 bytes, exactly the default
   `maxBufferSize`. onnxruntime-web binds it in pieces where the binding limit is 128 MiB. The loader used to require
   the binding limit to fit the table, which rejected devices that can run the model.
-- **Activations.** For a long prompt the MLP intermediate `[S, 6656]` is the largest activation (436 MB in fp32 at 16k
-  tokens). Split bindings returned all-zero output for a 671 MB fp32 intermediate (the 4B at 16k), so where the
-  binding limit is small the loader prefills in pieces that keep it within one binding (4,864 tokens for q4 and 9,984
-  for q4f16 at 128 MiB). With this GPU's own limit (2 GiB per binding) nothing is split and the published results are
+- **Activations.** onnxruntime-web's layer-norm kernels index their buffers directly instead of through the
+  accessor that spans the pieces of a split buffer, so their output is zero past the first binding, without an
+  error. This showed as all-zero output for the 4B's 16k prompts in fp32 at 128 MiB, and one-op models show it for
+  `LayerNormalization`, `SimplifiedLayerNormalization`, `SkipLayerNormalization` and `SkipSimplifiedLayerNormalization`
+  in 1.31.0-dev.20260918 (1.31.1 fixes the first two, not the Skip variants). Reported as [microsoft/onnxruntime#33755](https://github.com/microsoft/onnxruntime/issues/33755), with a fix for
+  the Skip variants in [#33760](https://github.com/microsoft/onnxruntime/pull/33760). Here the fp32 hidden state `[S, 2048]`
+  would pass 128 MiB at 16,385 tokens. Where the binding limit is small, the loader prefills in pieces that keep every
+  activation, including the largest (the MLP intermediate `[S, 6656]`), within one binding (4,864 tokens for q4 and
+  9,984 for q4f16 at 128 MiB). With this GPU's own limit (2 GiB per binding) nothing is split and the published results are
   unchanged (`browser_q4f16` rerun: 12/12 and 50/50 identical).
 
 

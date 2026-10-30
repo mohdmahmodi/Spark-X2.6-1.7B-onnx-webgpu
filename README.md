@@ -1,5 +1,12 @@
 # Spark-X2.6-1.7B for WebGPU
 
+[![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-md.svg)](https://huggingface.co/spaces/mohdmahmodi/Spark-X2.6-1.7B-WebGPU)
+[![Model on Hugging Face](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-md.svg)](https://huggingface.co/mohdmahmodi/Spark-X2.6-1.7B-ONNX-WebGPU)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Validation report](https://img.shields.io/badge/validation-report-brightgreen)](docs/VALIDATION.md)
+[![onnxruntime-web](https://img.shields.io/badge/onnxruntime--web-WebGPU-0078D4)](https://onnxruntime.ai/docs/tutorials/web/)
+[![Transformers.js](https://img.shields.io/badge/Transformers.js-4.3-FFD21E)](#with-transformersjs)
+
 ![Spark-X2.6-1.7B in the browser](model-card/assets/hero.png)
 
 [XHToken/Spark-X2.6-1.7B](https://huggingface.co/XHToken/Spark-X2.6-1.7B), the 1.7-billion-parameter Spark model,
@@ -11,7 +18,7 @@ converted to 4-bit ONNX and running entirely in the browser on WebGPU. No server
 
 | Model | Format | Runtime | Status |
 |---|---|---|---|
-| [Spark-X2.6-1.7B](https://huggingface.co/mohdmahmodi/Spark-X2.6-1.7B-ONNX-WebGPU) | ONNX, 4-bit weights (q4f16, q4) | onnxruntime-web, WebGPU | validated |
+| [Spark-X2.6-1.7B](https://huggingface.co/mohdmahmodi/Spark-X2.6-1.7B-ONNX-WebGPU) | ONNX, 4-bit weights (q4f16, q4) | onnxruntime-web, WebGPU | released, validated |
 
 - **Accurate.** Same scores as the official INT4 checkpoint in transformers: GSM8K 72.7%, BFCL function calling
   52.5%, needle in a haystack 12/12. The build adds a mean KL divergence of 0.00085 on top of the quantization.
@@ -131,7 +138,8 @@ Design decisions:
   the cached prefix and only prefills new tokens.
 - **Last-position logits only.** Prefill never materializes a `[sequence, 131072]` logits tensor.
 - **onnxruntime-web 1.31 dev build.** 1.30.0 disables flash attention on sliding-window layers past 512 tokens of
-  context ([microsoft/onnxruntime#32462](https://github.com/microsoft/onnxruntime/pull/32462)).
+  context ([microsoft/onnxruntime#32462](https://github.com/microsoft/onnxruntime/pull/32462)). The app pins the
+  build it was validated with; the 1.31.1 release has not been validated here yet.
 
 ## Use it in your own page
 
@@ -187,6 +195,12 @@ grows its KV cache at every step, so decoding slows down as the context grows. S
 The Transformers.js column uses onnxruntime-web `1.31.0-dev.20260918`, the app's build. 16k-token prompts need that
 build or newer: Transformers.js 4.3.2 bundles an older one that fails on them. With the newer build swapped in, all 12
 needle tests up to 16k tokens pass with output identical to the app's.
+
+On a GPU with the 128 MiB default storage-buffer binding limit, as on many phones, use the included loader for long
+prompts. Transformers.js prefills a prompt in one pass, and onnxruntime-web's layer-norm kernels
+return zeros once the hidden state is larger than one binding, without an error: from 16,385 tokens with
+`q4` and 32,769 with `q4f16`. The included loader prefills in pieces and is not affected. Reported as
+[microsoft/onnxruntime#33755](https://github.com/microsoft/onnxruntime/issues/33755); the fix is [#33760](https://github.com/microsoft/onnxruntime/pull/33760).
 
 ## Repository layout
 

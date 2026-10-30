@@ -180,6 +180,20 @@ for await (const text of spark.generate(messages, { thinking: false })) {
   output.textContent += text;
 }</code></pre>
           </li>
+          <li>
+            <h3>Or use Transformers.js</h3>
+            <p>
+              The same files load in Transformers.js 4.3 with <code>dtype: "q4f16"</code>, with identical output. The loader above is faster at long
+              context, since it keeps the KV cache in one preallocated buffer.
+            </p>
+            <pre><code class="language-javascript">import { pipeline } from "@huggingface/transformers";
+
+const generator = await pipeline("text-generation", "mohdmahmodi/Spark-X2.6-1.7B-ONNX-WebGPU", { device: "webgpu", dtype: "q4f16" });
+const out = await generator([{ role: "user", content: "Hello!" }], {
+  max_new_tokens: 256, tokenizer_encode_kwargs: { enable_thinking: false },
+});
+console.log(out[0].generated_text.at(-1).content);</code></pre>
+          </li>
         </ol>
 
         <h2 id="built">How it is built</h2>
