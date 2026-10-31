@@ -159,8 +159,8 @@ smallest limits a WebGPU device can have.
   accessor that spans the pieces of a split buffer, so their output is zero past the first binding, without an
   error. This showed as all-zero output for the 4B's 16k prompts in fp32 at 128 MiB, and one-op models show it for
   `LayerNormalization`, `SimplifiedLayerNormalization`, `SkipLayerNormalization` and `SkipSimplifiedLayerNormalization`
-  in 1.31.0-dev.20260918 (1.31.1 fixes the first two, not the Skip variants). Reported as [microsoft/onnxruntime#33755](https://github.com/microsoft/onnxruntime/issues/33755), with a fix for
-  the Skip variants in [#33760](https://github.com/microsoft/onnxruntime/pull/33760). Here the fp32 hidden state `[S, 2048]`
+  in 1.31.0-dev.20260918 (1.31.1 fixes the first two, not the Skip variants). Reported as [microsoft/onnxruntime#33755](https://github.com/microsoft/onnxruntime/issues/33755), and the Skip
+  variants are fixed by [#33760](https://github.com/microsoft/onnxruntime/pull/33760), merged on 2026-10-31 for onnxruntime 1.32 and not in a release yet. Here the fp32 hidden state `[S, 2048]`
   would pass 128 MiB at 16,385 tokens. Where the binding limit is small, the loader prefills in pieces that keep every
   activation, including the largest (the MLP intermediate `[S, 6656]`), within one binding (4,864 tokens for q4 and
   9,984 for q4f16 at 128 MiB). With this GPU's own limit (2 GiB per binding) nothing is split and the published results are
